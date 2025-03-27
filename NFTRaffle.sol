@@ -110,6 +110,7 @@ interface INFT {
 /**
  * @title NFTRaffle
  * @dev Contract that implements a raffle for NFT token IDs using Gelato VRF
+ * with prize associations
  */
 contract NFTRaffle is GelatoVRFConsumerBase {
     // Address of the NFT contract
@@ -121,8 +122,19 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     // Owner of the raffle contract
     address public immutable owner;
     
+    // Prize structure to store prize info
+    struct Prize {
+        string name;
+        uint256 tokenId;
+        address winner;
+        bool assigned;
+    }
+    
+    // Array of prize structures
+    Prize[] public prizes;
+    
     // Number of winners to select - now can be changed by owner
-    uint256 public numWinners = 100;
+    uint256 public numWinners = 5; // Starting with 5 for testing
     
     // Timestamp when minting is considered complete
     uint256 public mintingEndTime;
@@ -131,7 +143,7 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     bool public raffleExecuted;
     uint256 public randomnessRequestId;
     
-    // Storage for winners
+    // Storage for winners (kept for compatibility)
     uint256[] public winningTokenIds;
     address[] public winningAddresses;
     
@@ -140,29 +152,46 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     
     // Events
     event RaffleStarted(uint256 requestId);
-    event RaffleCompleted(uint256[] winningTokenIds, address[] winningAddresses);
+    event RaffleCompleted(Prize[] prizes);
     event MintingEndTimeSet(uint256 endTime);
     event NumWinnersSet(uint256 newNumWinners);
+    event PrizesSet(string[] prizeNames);
     
     /**
      * @dev Constructor
      * @param _nftContract Address of the NFT contract
      * @param _gelatoOperator Address of the Gelato VRF operator
      * @param _mintingEndTime Timestamp when minting is considered complete
+     * @param _prizeNames Array of prize names
      */
     constructor(
         address _nftContract, 
         address _gelatoOperator,
-        uint256 _mintingEndTime
+        uint256 _mintingEndTime,
+        string[] memory _prizeNames
     ) {
         require(_nftContract != address(0), "Invalid NFT contract address");
         require(_gelatoOperator != address(0), "Invalid Gelato operator address");
         require(_mintingEndTime > block.timestamp, "Minting end time must be in the future");
+        require(_prizeNames.length > 0, "At least one prize must be defined");
         
         nftContract = _nftContract;
         gelatoOperator = _gelatoOperator;
         mintingEndTime = _mintingEndTime;
         owner = msg.sender;
+        
+        // Initialize prizes array with provided names
+        for (uint i = 0; i < _prizeNames.length; i++) {
+            prizes.push(Prize({
+                name: _prizeNames[i],
+                tokenId: 0,
+                winner: address(0),
+                assigned: false
+            }));
+        }
+        
+        // Set numWinners to match prize count
+        numWinners = _prizeNames.length;
     }
     
     /**
@@ -181,15 +210,31 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     }
     
     /**
-     * @dev Set the number of winners to select
-     * @param _numWinners New number of winners
+     * @dev Set the prize names
+     * @param _prizeNames Array of prize names
      */
-    function setNumWinners(uint256 _numWinners) external onlyOwner {
-        require(_numWinners > 0, "Number of winners must be greater than 0");
+    function setPrizes(string[] memory _prizeNames) external onlyOwner {
+        require(_prizeNames.length > 0, "At least one prize must be defined");
         require(!raffleExecuted, "Raffle already executed");
         
-        numWinners = _numWinners;
-        emit NumWinnersSet(_numWinners);
+        // Reset prizes array
+        delete prizes;
+        
+        // Initialize prizes array with new names
+        for (uint i = 0; i < _prizeNames.length; i++) {
+            prizes.push(Prize({
+                name: _prizeNames[i],
+                tokenId: 0,
+                winner: address(0),
+                assigned: false
+            }));
+        }
+        
+        // Update numWinners to match prize count
+        numWinners = _prizeNames.length;
+        
+        emit PrizesSet(_prizeNames);
+        emit NumWinnersSet(_prizeNames.length);
     }
     
     /**
@@ -219,6 +264,7 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     function startRaffle() external onlyOwner returns (uint256 requestId) {
         require(!raffleExecuted, "Raffle already executed");
         require(isMintingComplete(), "Minting is not complete yet");
+        require(prizes.length > 0, "No prizes defined");
         
         // Additional check to ensure there are tokens to raffle
         uint256 totalSupply;
@@ -277,7 +323,7 @@ contract NFTRaffle is GelatoVRFConsumerBase {
         // Mark raffle as executed
         raffleExecuted = true;
         
-        emit RaffleCompleted(winningTokenIds, winningAddresses);
+        emit RaffleCompleted(prizes);
     }
     
     /**
@@ -295,9 +341,16 @@ contract NFTRaffle is GelatoVRFConsumerBase {
             selectedTokens[winningTokenIds[i]] = false;
         }
         
-        // Determine how many winners to select (up to numWinners)
-        uint256 winnersToSelect = numWinners;
-        if (_totalTokens < numWinners) {
+        // Reset prize assignments
+        for (uint256 i = 0; i < prizes.length; i++) {
+            prizes[i].tokenId = 0;
+            prizes[i].winner = address(0);
+            prizes[i].assigned = false;
+        }
+        
+        // Determine how many winners to select (up to numWinners or prizes.length)
+        uint256 winnersToSelect = prizes.length;
+        if (_totalTokens < winnersToSelect) {
             winnersToSelect = _totalTokens;
         }
         
@@ -323,6 +376,13 @@ contract NFTRaffle is GelatoVRFConsumerBase {
                     winningTokenIds.push(randomTokenId);
                     winningAddresses.push(tokenOwner);
                     
+                    // Associate with a prize
+                    if (winnerCount < prizes.length) {
+                        prizes[winnerCount].tokenId = randomTokenId;
+                        prizes[winnerCount].winner = tokenOwner;
+                        prizes[winnerCount].assigned = true;
+                    }
+                    
                     winnerCount++;
                 } catch {
                     // Skip tokens that don't exist or have issues
@@ -335,7 +395,16 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     }
     
     /**
-     * @dev Get the list of winning token IDs
+     * @dev Get the list of prizes with their assignments
+     * @return Array of Prize structures
+     */
+    function getPrizeAssignments() external view returns (Prize[] memory) {
+        require(raffleExecuted, "Raffle not executed yet");
+        return prizes;
+    }
+    
+    /**
+     * @dev Get the list of winning token IDs (for compatibility)
      * @return Array of winning token IDs
      */
     function getWinningTokenIds() external view returns (uint256[] memory) {
@@ -344,7 +413,7 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     }
     
     /**
-     * @dev Get the list of winning addresses
+     * @dev Get the list of winning addresses (for compatibility)
      * @return Array of addresses that own the winning tokens
      */
     function getWinningAddresses() external view returns (address[] memory) {
@@ -353,7 +422,7 @@ contract NFTRaffle is GelatoVRFConsumerBase {
     }
     
     /**
-     * @dev Get both winning token IDs and their owners
+     * @dev Get both winning token IDs and their owners (for compatibility)
      * @return tokenIds Array of winning token IDs
      * @return owners Array of addresses that own the winning tokens
      */
