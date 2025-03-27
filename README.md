@@ -39,3 +39,17 @@ The `NFTRaffle` contract implements the raffle logic by extending the abstract `
 - The contract implements proper access controls to ensure only authorized parties can initiate the raffle
 - The randomness provided by Gelato VRF ensures the selection process is fair and cannot be manipulated
 - Error handling is implemented to gracefully handle edge cases
+
+
+## ⚠️ Security Warning ⚠️
+
+**IMPORTANT**: This contract has not undergone a comprehensive security audit by a professional auditing firm. It is provided as-is without any warranties or guarantees.
+
+- **NOT PRODUCTION READY**: This code should not be used in production without a thorough security audit.
+- **USE AT YOUR OWN RISK**: Any use of this contract for managing real assets is done at your own risk.
+- **AUDIT RECOMMENDED**: Before deploying to a production environment or using with valuable assets, it is strongly recommended to:
+  1. Have the code professionally audited by a reputable smart contract auditing firm
+  2. Conduct thorough testing on testnets
+  3. Implement proper monitoring and emergency procedures
+
+The developers assume no liability for any losses incurred from using this code.
